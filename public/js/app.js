@@ -251,7 +251,7 @@ document.addEventListener('DOMContentLoaded', function() {
             if (status.dependencies) {
                 statusHtml += '<h4>Dependencies:</h4>';
                 for (const [dep, statusInfo] of Object.entries(status.dependencies)) {
-                    const isAvailable = !statusInfo.includes('Not available');
+                    const isAvailable = statusInfo === 'Available';
                     statusHtml += `
                         <div class="status-item">
                             <code>${dep}</code>
@@ -261,6 +261,16 @@ document.addEventListener('DOMContentLoaded', function() {
                         </div>
                     `;
                 }
+                
+                // Add functional status
+                statusHtml += `
+                    <div class="status-item">
+                        <strong>Conversion Status:</strong>
+                        <span style="color: ${status.functional ? 'var(--success-color)' : 'var(--accent-color)'}">
+                            ${status.functional ? '✓ Fully Functional' : '❌ Dependencies Missing'}
+                        </span>
+                    </div>
+                `;
             }
 
             if (status.note) {
