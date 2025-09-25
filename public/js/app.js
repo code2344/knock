@@ -271,6 +271,23 @@ document.addEventListener('DOMContentLoaded', function() {
                         </span>
                     </div>
                 `;
+                
+                // Add install button if dependencies are missing
+                if (status.canInstall && !status.functional) {
+                    statusHtml += `
+                        <div class="install-section">
+                            <button id="install-dependencies-btn" class="install-btn">
+                                📦 Install Dependencies
+                            </button>
+                            <div id="install-progress" style="display: none;">
+                                <p>Installing dependencies, please wait...</p>
+                                <div class="progress-bar">
+                                    <div class="progress-fill" style="width: 50%; animation: pulse 1s infinite;"></div>
+                                </div>
+                            </div>
+                        </div>
+                    `;
+                }
             }
 
             if (status.note) {
@@ -279,6 +296,12 @@ document.addEventListener('DOMContentLoaded', function() {
 
             statusHtml += '</div>';
             systemStatus.innerHTML = statusHtml;
+            
+            // Add event listener for install button if it exists
+            const installBtn = document.getElementById('install-dependencies-btn');
+            if (installBtn) {
+                installBtn.addEventListener('click', installDependencies);
+            }
         } catch (error) {
             console.error('Failed to load system status:', error);
             systemStatus.innerHTML = `
@@ -286,6 +309,48 @@ document.addEventListener('DOMContentLoaded', function() {
                     <p style="color: var(--accent-color);">❌ Failed to load system status</p>
                 </div>
             `;
+        }
+    }
+    
+    async function installDependencies() {
+        const installBtn = document.getElementById('install-dependencies-btn');
+        const installProgress = document.getElementById('install-progress');
+        
+        if (!installBtn || !installProgress) return;
+        
+        // Show progress, hide button
+        installBtn.style.display = 'none';
+        installProgress.style.display = 'block';
+        
+        try {
+            const response = await fetch('/api/install-dependencies', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                }
+            });
+            
+            const result = await response.json();
+            
+            // Hide progress
+            installProgress.style.display = 'none';
+            
+            if (result.success) {
+                // Show success message and reload status
+                alert(`✅ ${result.message}`);
+                await loadSystemStatus();
+            } else {
+                // Show error message and restore button
+                alert(`❌ ${result.message}`);
+                installBtn.style.display = 'block';
+            }
+            
+        } catch (error) {
+            console.error('Installation failed:', error);
+            // Hide progress, show button
+            installProgress.style.display = 'none';
+            installBtn.style.display = 'block';
+            alert('❌ Installation failed: ' + error.message);
         }
     }
 });

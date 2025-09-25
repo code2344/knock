@@ -108,6 +108,194 @@ function runCommand(command, args, options = {}) {
     });
 }
 
+// Installation functions for CLI dependencies
+async function installDependencies() {
+    const dependenciesDir = path.join(__dirname, 'dependencies');
+    
+    // Ensure dependencies directory exists
+    if (!fs.existsSync(dependenciesDir)) {
+        fs.mkdirSync(dependenciesDir, { recursive: true });
+    }
+    
+    const installTasks = [
+        installLibgourouUtils(dependenciesDir),
+        installIneptEpub(dependenciesDir)
+    ];
+    
+    try {
+        await Promise.all(installTasks);
+        console.log('✅ All dependencies installed successfully');
+    } catch (error) {
+        console.error('❌ Some dependencies failed to install:', error.message);
+    }
+}
+
+async function installLibgourouUtils(dependenciesDir) {
+    const libgourouDir = path.join(dependenciesDir, 'libgourou-utils');
+    
+    // Check if already installed
+    if (fs.existsSync(path.join(libgourouDir, 'adept-register')) || await checkCommandExists('adept-register')) {
+        console.log('libgourou-utils already installed');
+        return;
+    }
+    
+    console.log('📦 Installing libgourou-utils...');
+    
+    try {
+        // Try different Git clone approaches
+        let cloneSuccess = false;
+        const repoUrl = 'https://github.com/BentonEdmondson/libgourou-utils.git';
+        
+        try {
+            await runCommand('git', ['clone', repoUrl, libgourouDir]);
+            cloneSuccess = true;
+        } catch (error) {
+            console.log('HTTPS clone failed, trying without credentials...');
+            try {
+                // Set Git to not prompt for credentials
+                await runCommand('git', ['-c', 'credential.helper=', 'clone', repoUrl, libgourouDir]);
+                cloneSuccess = true;
+            } catch (error2) {
+                console.error('Git clone failed:', error2.message);
+                throw new Error('Unable to clone repository. Please check network connection and Git configuration.');
+            }
+        }
+        
+        if (!cloneSuccess || !fs.existsSync(libgourouDir)) {
+            throw new Error('Repository cloning failed');
+        }
+        
+        // Try to install system dependencies (may fail in restricted environments)
+        try {
+            await runCommand('apt-get', ['update'], { cwd: libgourouDir });
+            await runCommand('apt-get', ['install', '-y', 'build-essential', 'libssl-dev', 'libcurl4-openssl-dev', 'libpugixml-dev', 'libzip-dev'], { cwd: libgourouDir });
+        } catch (error) {
+            console.log('System package installation failed (may need sudo):', error.message);
+            throw new Error('System dependencies installation failed. Please install manually: build-essential libssl-dev libcurl4-openssl-dev libpugixml-dev libzip-dev');
+        }
+        
+        // Build the project
+        await runCommand('make', [], { cwd: libgourouDir });
+        
+        if (!fs.existsSync(path.join(libgourouDir, 'adept-register')) || !fs.existsSync(path.join(libgourouDir, 'adept-download'))) {
+            throw new Error('Build failed - executables not found');
+        }
+        
+        // Try to create symlinks (may fail without sudo)
+        try {
+            const binDir = '/usr/local/bin';
+            await runCommand('ln', ['-sf', path.join(libgourouDir, 'adept-register'), path.join(binDir, 'adept-register')]);
+            await runCommand('ln', ['-sf', path.join(libgourouDir, 'adept-download'), path.join(binDir, 'adept-download')]);
+        } catch (error) {
+            console.log('Global installation failed, trying local PATH...');
+            // Add to PATH via environment (temporary)
+            process.env.PATH = `${libgourouDir}:${process.env.PATH}`;
+        }
+        
+        console.log('✅ libgourou-utils installed successfully');
+    } catch (error) {
+        console.error('❌ Failed to install libgourou-utils:', error.message);
+        throw error;
+    }
+}
+
+async function installIneptEpub(dependenciesDir) {
+    const ineptDir = path.join(dependenciesDir, 'inept-epub');
+    
+    // Check if already installed
+    if (fs.existsSync(path.join(ineptDir, 'inept-epub.py')) || await checkCommandExists('inept-epub')) {
+        console.log('inept-epub already installed');
+        return;
+    }
+    
+    console.log('📦 Installing inept-epub...');
+    
+    try {
+        // Try different Git clone approaches
+        let cloneSuccess = false;
+        const repoUrl = 'https://github.com/BentonEdmondson/inept-epub.git';
+        
+        try {
+            await runCommand('git', ['clone', repoUrl, ineptDir]);
+            cloneSuccess = true;
+        } catch (error) {
+            console.log('HTTPS clone failed, trying without credentials...');
+            try {
+                await runCommand('git', ['-c', 'credential.helper=', 'clone', repoUrl, ineptDir]);
+                cloneSuccess = true;
+            } catch (error2) {
+                console.error('Git clone failed:', error2.message);
+                throw new Error('Unable to clone repository. Please check network connection and Git configuration.');
+            }
+        }
+        
+        if (!cloneSuccess || !fs.existsSync(ineptDir)) {
+            throw new Error('Repository cloning failed');
+        }
+        
+        // Try to install Python dependencies
+        try {
+            await runCommand('apt-get', ['install', '-y', 'python3', 'python3-pip'], { cwd: ineptDir });
+            
+            // Check if requirements.txt exists
+            if (fs.existsSync(path.join(ineptDir, 'requirements.txt'))) {
+                await runCommand('pip3', ['install', '-r', 'requirements.txt'], { cwd: ineptDir });
+            }
+        } catch (error) {
+            console.log('Python dependencies installation failed:', error.message);
+            // Continue anyway, as the script might work without additional dependencies
+        }
+        
+        // Create executable script
+        const ineptScript = `#!/bin/bash
+cd "${ineptDir}"
+python3 inept-epub.py "$@"
+`;
+        
+        const scriptPath = path.join(ineptDir, 'inept-epub');
+        fs.writeFileSync(scriptPath, ineptScript);
+        fs.chmodSync(scriptPath, 0o755);
+        
+        // Try to create symlink (may fail without sudo)
+        try {
+            await runCommand('ln', ['-sf', scriptPath, '/usr/local/bin/inept-epub']);
+        } catch (error) {
+            console.log('Global installation failed, adding to PATH...');
+            // Add to PATH via environment (temporary)
+            process.env.PATH = `${ineptDir}:${process.env.PATH}`;
+        }
+        
+        console.log('✅ inept-epub installed successfully');
+    } catch (error) {
+        console.error('❌ Failed to install inept-epub:', error.message);
+        throw error;
+    }
+}
+
+// Enhanced dependency checking with installation fallback
+async function ensureDependencies() {
+    const commands = ['adept-register', 'adept-download', 'inept-epub'];
+    const missing = [];
+    
+    for (const cmd of commands) {
+        const exists = await checkCommandExists(cmd);
+        if (!exists) {
+            missing.push(cmd);
+        }
+    }
+    
+    if (missing.length > 0) {
+        console.log(`Missing dependencies: ${missing.join(', ')}`);
+        console.log('⚠️  Dependencies missing. Install manually or use the web interface installation feature.');
+        console.log('Note: Automatic installation requires appropriate system permissions.');
+    } else {
+        console.log('✅ All dependencies are available');
+    }
+}
+
+// Check and install dependencies on startup
+ensureDependencies().catch(console.error);
+
 async function registerDevice(email, password, adobeDir) {
     // Ensure adobe directory exists
     if (!fs.existsSync(adobeDir)) {
@@ -371,9 +559,10 @@ app.get('/api/status', async (req, res) => {
             version: '1.0.0',
             dependencies,
             functional: allAvailable,
+            canInstall: !allAvailable,
             note: allAvailable 
                 ? 'All dependencies available. Full conversion functionality enabled.' 
-                : 'Some dependencies missing. Install libgourou-utils and inept-epub for full functionality.'
+                : 'Some dependencies missing. Click "Install Dependencies" to install automatically.'
         });
     } catch (error) {
         console.error('Status check error:', error);
@@ -387,6 +576,62 @@ app.get('/api/status', async (req, res) => {
             },
             functional: false,
             note: 'Unable to check system dependencies.'
+        });
+    }
+});
+
+// API endpoint for installing dependencies
+app.post('/api/install-dependencies', async (req, res) => {
+    try {
+        console.log('Manual dependency installation requested');
+        
+        // Check current status
+        const dependencies = {};
+        const commands = ['adept-register', 'adept-download', 'inept-epub'];
+        
+        for (const cmd of commands) {
+            const exists = await checkCommandExists(cmd);
+            dependencies[cmd] = exists ? 'Available' : 'Not available';
+        }
+        
+        const missing = Object.keys(dependencies).filter(cmd => dependencies[cmd] === 'Not available');
+        
+        if (missing.length === 0) {
+            return res.json({
+                success: true,
+                message: 'All dependencies are already installed',
+                dependencies
+            });
+        }
+        
+        // Attempt installation
+        await installDependencies();
+        
+        // Re-check status after installation
+        const newDependencies = {};
+        for (const cmd of commands) {
+            const exists = await checkCommandExists(cmd);
+            newDependencies[cmd] = exists ? 'Available' : 'Not available';
+        }
+        
+        const stillMissing = Object.keys(newDependencies).filter(cmd => newDependencies[cmd] === 'Not available');
+        
+        res.json({
+            success: stillMissing.length === 0,
+            message: stillMissing.length === 0 
+                ? 'All dependencies installed successfully' 
+                : `Installation completed, but some dependencies are still missing: ${stillMissing.join(', ')}`,
+            dependencies: newDependencies,
+            installed: missing.filter(cmd => newDependencies[cmd] === 'Available'),
+            failed: stillMissing
+        });
+        
+    } catch (error) {
+        console.error('Installation error:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Installation failed: ' + error.message,
+            error: error.message
         });
     }
 });
